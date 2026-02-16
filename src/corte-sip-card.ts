@@ -32,10 +32,17 @@ export class CorteSipCard extends LitElement {
   @state() private _config?: SipCardConfig;
   @state() private _sipCore?: SipCore;
   @state() private _isInitializing = true;
+  @state() private _cameraStreamUrl?: string;
+  @state() private _useWebRTC = false;
   private _initTimeout?: number;
+  private _hls?: any;
+  private _webrtcPeerConnection?: RTCPeerConnection;
 
   public setConfig(config: SipCardConfig): void {
     this._config = config;
+    if (config.camera_entity && this.hass) {
+      this._setupCameraStream();
+    }
   }
 
   connectedCallback(): void {
@@ -51,6 +58,11 @@ export class CorteSipCard extends LitElement {
       }, 3000);
     }
     window.addEventListener('sipcore-update', this._updateHandler);
+    
+    // Setup camera stream if configured
+    if (this._config?.camera_entity) {
+      this._setupCameraStream();
+    }
   }
 
   disconnectedCallback(): void {
@@ -58,6 +70,16 @@ export class CorteSipCard extends LitElement {
     window.removeEventListener('sipcore-update', this._updateHandler);
     if (this._initTimeout) {
       clearTimeout(this._initTimeout);
+    }
+    this._cleanupCameraStream();
+  }
+
+  updated(changedProperties: Map<string, any>): void {
+    super.updated(changedProperties);
+    
+    // Initialize HLS player when camera stream URL is set (and not using WebRTC)
+    if (changedProperties.has('_cameraStreamUrl') && this._cameraStreamUrl && !this._useWebRTC) {
+      setTimeout(() => this._initHLSPlayer(), 0);
     }
   }
 
@@ -121,12 +143,142 @@ export class CorteSipCard extends LitElement {
     return this._sipCore?.callDuration || '';
   }
 
-  private get _cameraUrl(): string | null {
-    if (!this._config?.camera_entity || !this.hass) return null;
-    const entity = this.hass.states[this._config.camera_entity];
-    if (!entity) return null;
-    // Use camera proxy for still images that auto-refresh
-    return `/api/camera_proxy/${this._config.camera_entity}`;
+  private async _setupCameraStream(): Promise<void> {
+    if (!this._config?.camera_entity || !this.hass) return;
+    
+    // Try WebRTC first for lower latency
+    const webrtcSuccess = await this._tryWebRTC();
+    if (webrtcSuccess) return;
+    
+    // Fall back to HLS
+    await this._tryHLS();
+  }
+
+  private async _tryWebRTC(): Promise<boolean> {
+    if (!this._config?.camera_entity || !this.hass) return false;
+    
+    try {
+      // Request WebRTC connection
+      const result = await this.hass.callWS<any>({
+        type: 'camera/web_rtc_offer',
+        entity_id: this._config.camera_entity,
+        offer: await this._createWebRTCOffer(),
+      });
+      
+      if (!result || !result.answer) {
+        return false;
+      }
+      
+      // Set remote description with the answer
+      await this._webrtcPeerConnection!.setRemoteDescription(
+        new RTCSessionDescription({ type: 'answer', sdp: result.answer })
+      );
+      
+      this._useWebRTC = true;
+      this.requestUpdate();
+      return true;
+    } catch (error) {
+      console.log('WebRTC not available, falling back to HLS:', error);
+      this._cleanupWebRTC();
+      return false;
+    }
+  }
+
+  private async _createWebRTCOffer(): Promise<string> {
+    // Create peer connection
+    this._webrtcPeerConnection = new RTCPeerConnection({
+      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+    });
+    
+    // Handle incoming tracks
+    this._webrtcPeerConnection.ontrack = (event) => {
+      const videoElement = this.shadowRoot?.getElementById('camera-stream') as HTMLVideoElement;
+      if (videoElement && event.streams[0]) {
+        videoElement.srcObject = event.streams[0];
+      }
+    };
+    
+    // Add transceiver for receiving video
+    this._webrtcPeerConnection.addTransceiver('video', { direction: 'recvonly' });
+    this._webrtcPeerConnection.addTransceiver('audio', { direction: 'recvonly' });
+    
+    // Create and return offer
+    const offer = await this._webrtcPeerConnection.createOffer();
+    await this._webrtcPeerConnection.setLocalDescription(offer);
+    
+    return offer.sdp!;
+  }
+
+  private async _tryHLS(): Promise<void> {
+    if (!this._config?.camera_entity || !this.hass) return;
+    
+    try {
+      // Request HLS stream from Home Assistant
+      const result = await this.hass.callWS<{ url: string }>({
+        type: 'camera/stream',
+        entity_id: this._config.camera_entity,
+      });
+      
+      this._cameraStreamUrl = result.url;
+      this._useWebRTC = false;
+      this.requestUpdate();
+      
+      // Setup HLS player after render
+      setTimeout(() => this._initHLSPlayer(), 100);
+    } catch (error) {
+      console.error('Failed to get camera stream:', error);
+      this._cameraStreamUrl = undefined;
+    }
+  }
+
+  private _initHLSPlayer(): void {
+    if (this._useWebRTC) return; // Don't init HLS if using WebRTC
+    
+    const videoElement = this.shadowRoot?.getElementById('camera-stream') as HTMLVideoElement;
+    if (!videoElement || !this._cameraStreamUrl) return;
+
+    // Check if browser supports HLS natively (Safari)
+    if (videoElement.canPlayType('application/vnd.apple.mpegurl')) {
+      videoElement.src = this._cameraStreamUrl;
+    } else {
+      // Use hls.js for other browsers
+      this._loadHLSLibrary().then(() => {
+        if ((window as any).Hls?.isSupported()) {
+          this._hls = new (window as any).Hls();
+          this._hls.loadSource(this._cameraStreamUrl!);
+          this._hls.attachMedia(videoElement);
+        }
+      });
+    }
+  }
+
+  private async _loadHLSLibrary(): Promise<void> {
+    if ((window as any).Hls) return;
+    
+    return new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = 'https://cdn.jsdelivr.net/npm/hls.js@latest';
+      script.onload = () => resolve();
+      script.onerror = reject;
+      document.head.appendChild(script);
+    });
+  }
+
+  private _cleanupCameraStream(): void {
+    this._cleanupWebRTC();
+    if (this._hls) {
+      this._hls.destroy();
+      this._hls = undefined;
+    }
+    this._cameraStreamUrl = undefined;
+    this._useWebRTC = false;
+  }
+
+  private _cleanupWebRTC(): void {
+    if (this._webrtcPeerConnection) {
+      this._webrtcPeerConnection.close();
+      this._webrtcPeerConnection = undefined;
+    }
   }
 
   private _answerCall(): void {
@@ -185,8 +337,16 @@ export class CorteSipCard extends LitElement {
   private _renderIncomingCall(): TemplateResult {
     return html`
       <div class="incoming-call">
-        ${this._cameraUrl
-          ? html` <img src="${this._cameraUrl}" class="camera-feed" /> `
+        ${this._useWebRTC || this._cameraStreamUrl
+          ? html`
+              <video
+                id="camera-stream"
+                class="camera-feed"
+                autoplay
+                muted
+                playsinline
+              ></video>
+            `
           : html`<div class="call-icon">📞</div>`}
         <div class="call-info">
           <div class="caller-name">${this._callerName}</div>
@@ -231,10 +391,19 @@ export class CorteSipCard extends LitElement {
                 autoplay
                 playsinline
                 muted
+                controls
               ></video>
             `
-          : this._cameraUrl
-            ? html` <img src="${this._cameraUrl}" class="camera-feed" /> `
+          : this._useWebRTC || this._cameraStreamUrl
+            ? html`
+                <video
+                  id="camera-stream"
+                  class="camera-feed"
+                  autoplay
+                  muted
+                  playsinline
+                ></video>
+              `
             : html`<div class="call-icon active">📞</div>`}
         <audio id="corte-audio" autoplay></audio>
         <div class="call-info">
@@ -259,8 +428,16 @@ export class CorteSipCard extends LitElement {
   private _renderIdle(): TemplateResult {
     return html`
       <div class="idle-state">
-        ${this._cameraUrl
-          ? html` <img src="${this._cameraUrl}" class="camera-feed" /> `
+        ${this._useWebRTC || this._cameraStreamUrl
+          ? html`
+              <video
+                id="camera-stream"
+                class="camera-feed"
+                autoplay
+                muted
+                playsinline
+              ></video>
+            `
           : html`<div class="status-icon">📱</div>`}
         <div class="status-text">No Active Calls</div>
         <div class="entity-state">
