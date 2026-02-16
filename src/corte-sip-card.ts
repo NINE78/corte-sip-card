@@ -1,6 +1,10 @@
 import { LitElement, html, css, TemplateResult } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
-import { HomeAssistant, LovelaceCardConfig, LovelaceCardEditor } from 'custom-card-helpers';
+import {
+  HomeAssistant,
+  LovelaceCardConfig,
+  LovelaceCardEditor,
+} from 'custom-card-helpers';
 import { fireEvent } from 'custom-card-helpers';
 
 interface SipCardConfig extends LovelaceCardConfig {
@@ -33,9 +37,13 @@ interface LovelaceCard extends HTMLElement {
 }
 
 @customElement('corte-sip-card-editor')
-export class CorteSipCardEditor extends LitElement implements LovelaceCardEditor {
+export class CorteSipCardEditor
+  extends LitElement
+  implements LovelaceCardEditor
+{
   @property({ attribute: false }) public hass!: HomeAssistant;
   @state() private _config?: SipCardConfig;
+  @state() private _showCardPicker = false;
 
   public setConfig(config: SipCardConfig): void {
     this._config = config;
@@ -43,22 +51,22 @@ export class CorteSipCardEditor extends LitElement implements LovelaceCardEditor
 
   private _valueChanged(ev: CustomEvent | Event): void {
     if (!this._config || !this.hass) return;
-    
+
     const target = ev.target as any;
     const configValue = target.configValue;
-    
+
     if (!configValue) return;
-    
+
     let value: any = target.value;
-    
+
     // Don't update if value hasn't changed
     if (this._config[configValue] === value) return;
-    
+
     const newConfig = {
       ...this._config,
       [configValue]: value || undefined,
     };
-    
+
     fireEvent(this, 'config-changed', { config: newConfig });
   }
 
@@ -68,7 +76,35 @@ export class CorteSipCardEditor extends LitElement implements LovelaceCardEditor
 
     const newConfig = {
       ...this._config,
+      camera_card: ev.detail.value || ev.detail.config,
+    };
+
+    fireEvent(this, 'config-changed', { config: newConfig });
+  }
+
+  private _toggleCardPicker(): void {
+    this._showCardPicker = !this._showCardPicker;
+  }
+
+  private _cardPicked(ev: CustomEvent): void {
+    ev.stopPropagation();
+    if (!this._config) return;
+
+    const newConfig = {
+      ...this._config,
       camera_card: ev.detail.config,
+    };
+
+    fireEvent(this, 'config-changed', { config: newConfig });
+    this._showCardPicker = false;
+  }
+
+  private _deleteCard(): void {
+    if (!this._config) return;
+
+    const newConfig = {
+      ...this._config,
+      camera_card: undefined,
     };
 
     fireEvent(this, 'config-changed', { config: newConfig });
@@ -93,13 +129,39 @@ export class CorteSipCardEditor extends LitElement implements LovelaceCardEditor
           .configValue=${'call_number'}
           @input=${this._valueChanged}
         ></ha-textfield>
-        
-        <h3>Camera Card (Optional)</h3>
-        <hui-card-element-editor
-          .hass=${this.hass}
-          .value=${this._config.camera_card}
-          @value-changed=${this._cameraCardChanged}
-        ></hui-card-element-editor>
+
+        <div class="camera-config-section">
+          <div class="camera-header">
+            <h3>Camera Card (Optional)</h3>
+            ${this._config.camera_card
+              ? html`
+                  <mwc-button @click=${this._deleteCard}>Remove</mwc-button>
+                `
+              : html`
+                  <mwc-button @click=${this._toggleCardPicker}>Add Card</mwc-button>
+                `}
+          </div>
+          
+          ${this._showCardPicker
+            ? html`
+                <hui-card-picker
+                  .hass=${this.hass}
+                  @config-changed=${this._cardPicked}
+                ></hui-card-picker>
+              `
+            : this._config.camera_card
+              ? html`
+                  <div class="card-editor-wrapper">
+                    <div class="card-type-label">Type: ${this._config.camera_card.type}</div>
+                    <hui-card-element-editor
+                      .hass=${this.hass}
+                      .value=${this._config.camera_card}
+                      @config-changed=${this._cameraCardChanged}
+                    ></hui-card-element-editor>
+                  </div>
+                `
+              : ''}
+        </div>
       </div>
     `;
   }
@@ -111,15 +173,48 @@ export class CorteSipCardEditor extends LitElement implements LovelaceCardEditor
       gap: 12px;
       padding: 12px;
     }
-    
+
+    .camera-config-section {
+      margin-top: 16px;
+      padding: 12px;
+      background: var(--secondary-background-color);
+      border-radius: 8px;
+    }
+
+    .camera-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+
     h3 {
-      margin: 16px 0 8px 0;
+      margin: 0;
       font-size: 14px;
       font-weight: 500;
       color: var(--primary-text-color);
     }
-    
+
+    .card-editor-wrapper {
+      margin-top: 12px;
+    }
+
+    .card-type-label {
+      font-size: 12px;
+      color: var(--secondary-text-color);
+      margin-bottom: 8px;
+      padding: 4px 8px;
+      background: var(--primary-background-color);
+      border-radius: 4px;
+      display: inline-block;
+    }
+
     hui-card-element-editor {
+      display: block;
+      margin-top: 8px;
+    }
+
+    hui-card-picker {
       display: block;
     }
   `;
@@ -133,9 +228,12 @@ export class CorteSipCard extends LitElement {
   @state() private _isInitializing = true;
   private _initTimeout?: number;
   private _cameraCard?: LovelaceCard;
+  private _cameraCardCreated = false;
 
   public static getConfigElement(): LovelaceCardEditor {
-    return document.createElement('corte-sip-card-editor') as LovelaceCardEditor;
+    return document.createElement(
+      'corte-sip-card-editor',
+    ) as LovelaceCardEditor;
   }
 
   public static getStubConfig(): SipCardConfig {
@@ -147,6 +245,8 @@ export class CorteSipCard extends LitElement {
 
   public setConfig(config: SipCardConfig): void {
     this._config = config;
+    // Reset the flag when config changes
+    this._cameraCardCreated = false;
   }
 
   connectedCallback(): void {
@@ -174,15 +274,27 @@ export class CorteSipCard extends LitElement {
 
   updated(changedProperties: Map<string, any>): void {
     super.updated(changedProperties);
-    
+
+    // Create camera card when we have both hass and config
+    if (this.hass && this._config?.camera_card && !this._cameraCardCreated) {
+      console.log('[SIP Card] Triggering camera card creation in updated()');
+      this._cameraCardCreated = true;
+      this._createCameraCard();
+    }
+
+    // Update hass on existing camera card
     if (changedProperties.has('hass') && this._cameraCard) {
       this._cameraCard.hass = this.hass;
     }
-    
+
     // Append camera card to container if it exists
     if (this._cameraCard) {
-      const container = this.shadowRoot?.querySelector('#camera-card-container');
+      const container = this.shadowRoot?.querySelector(
+        '#camera-card-container',
+      );
+      console.log('[SIP Card] Container:', container, 'Card:', this._cameraCard);
       if (container && !container.contains(this._cameraCard)) {
+        console.log('[SIP Card] Appending camera card to container');
         container.appendChild(this._cameraCard);
       }
     }
@@ -194,26 +306,48 @@ export class CorteSipCard extends LitElement {
       return;
     }
 
+    console.log('[SIP Card] Creating camera card with config:', this._config.camera_card);
+
     try {
       const cardConfig = this._config.camera_card;
-      
+
       // Get the card type and create the element
       const cardType = cardConfig.type.replace(/^custom:/, '');
-      let element: LovelaceCard | null = null;
-      
-      if (cardConfig.type.startsWith('custom:')) {
-        // Custom card
-        element = document.createElement(cardType) as LovelaceCard;
-      } else {
-        // Built-in Home Assistant card
-        element = document.createElement(`hui-${cardType}-card`) as LovelaceCard;
+      const elementType = cardConfig.type.startsWith('custom:')
+        ? cardType
+        : `hui-${cardType}-card`;
+
+      console.log('[SIP Card] Element type:', elementType);
+
+      // Try to wait for element definition, but don't block forever
+      try {
+        await Promise.race([
+          customElements.whenDefined(elementType),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Timeout')), 5000)
+          ),
+        ]);
+        console.log('[SIP Card] Element is defined');
+      } catch (e) {
+        console.warn(
+          `Element ${elementType} not defined yet, attempting to create anyway`,
+        );
       }
-      
+
+      // Create the element
+      const element = document.createElement(elementType) as LovelaceCard;
+      console.log('[SIP Card] Created element:', element);
+
       if (element && element.setConfig) {
         element.setConfig(cardConfig);
         element.hass = this.hass;
         this._cameraCard = element;
+        console.log('[SIP Card] Camera card initialized successfully');
         this.requestUpdate();
+      } else {
+        console.error(
+          `Element ${elementType} does not have setConfig method`,
+        );
       }
     } catch (err) {
       console.error('Error creating camera card:', err);
