@@ -78,7 +78,9 @@ export class CorteSipCard extends LitElement {
     if (!this._sipCore) return;
 
     // Update audio stream
-    const audioElement = this.shadowRoot?.getElementById('corte-audio') as HTMLAudioElement;
+    const audioElement = this.shadowRoot?.getElementById(
+      'corte-audio',
+    ) as HTMLAudioElement;
     if (audioElement && this._sipCore.remoteAudioStream) {
       if (audioElement.srcObject !== this._sipCore.remoteAudioStream) {
         audioElement.srcObject = this._sipCore.remoteAudioStream;
@@ -86,7 +88,9 @@ export class CorteSipCard extends LitElement {
     }
 
     // Update video stream
-    const videoElement = this.shadowRoot?.getElementById('corte-video') as HTMLVideoElement;
+    const videoElement = this.shadowRoot?.getElementById(
+      'corte-video',
+    ) as HTMLVideoElement;
     if (videoElement && this._sipCore.remoteVideoStream) {
       if (videoElement.srcObject !== this._sipCore.remoteVideoStream) {
         videoElement.srcObject = this._sipCore.remoteVideoStream;
@@ -99,7 +103,10 @@ export class CorteSipCard extends LitElement {
   }
 
   private get _isInCall(): boolean {
-    return this._sipCore?.callState === 'connected' || this._sipCore?.callState === 'talking';
+    return (
+      this._sipCore?.callState === 'connected' ||
+      this._sipCore?.callState === 'talking'
+    );
   }
 
   private get _callerName(): string {
@@ -153,7 +160,10 @@ export class CorteSipCard extends LitElement {
       return html`
         <ha-card>
           <div class="card-content">
-            <div class="error">SIP Core not loaded. Make sure the SIP Core integration is installed and configured.</div>
+            <div class="error">
+              SIP Core not loaded. Make sure the SIP Core integration is
+              installed and configured.
+            </div>
           </div>
         </ha-card>
       `;
@@ -162,9 +172,11 @@ export class CorteSipCard extends LitElement {
     return html`
       <ha-card .header=${cardName}>
         <div class="card-content">
-          ${this._isRinging ? this._renderIncomingCall() : 
-            this._isInCall ? this._renderActiveCall() : 
-            this._renderIdle()}
+          ${this._isRinging
+            ? this._renderIncomingCall()
+            : this._isInCall
+              ? this._renderActiveCall()
+              : this._renderIdle()}
         </div>
       </ha-card>
     `;
@@ -173,25 +185,25 @@ export class CorteSipCard extends LitElement {
   private _renderIncomingCall(): TemplateResult {
     return html`
       <div class="incoming-call">
-        ${this._cameraUrl ? html`
-          <img src="${this._cameraUrl}" class="camera-feed" />
-        ` : html`<div class="call-icon">📞</div>`}
+        ${this._cameraUrl
+          ? html` <img src="${this._cameraUrl}" class="camera-feed" /> `
+          : html`<div class="call-icon">📞</div>`}
         <div class="call-info">
           <div class="caller-name">${this._callerName}</div>
           <div class="caller-number">${this._callerNumber}</div>
           <div class="call-status">Incoming Call...</div>
         </div>
         <div class="call-actions">
-          <button 
-            class="action-button answer" 
+          <button
+            class="action-button answer"
             @click=${this._answerCall}
             title="Answer Call"
           >
             <span class="button-icon">📞</span>
             <span class="button-text">Answer</span>
           </button>
-          <button 
-            class="action-button reject" 
+          <button
+            class="action-button reject"
             @click=${this._endCall}
             title="Reject Call"
           >
@@ -205,37 +217,34 @@ export class CorteSipCard extends LitElement {
 
   private _renderActiveCall(): TemplateResult {
     const hasVideo = this._sipCore?.remoteVideoStream;
-    
+
     // Update streams after render
     setTimeout(() => this._updateStreams(), 0);
-    
+
     return html`
       <div class="active-call">
-        ${hasVideo ? html`
-          <video 
-            id="corte-video"
-            class="video-stream"
-            autoplay
-            playsinline
-            muted
-          ></video>
-        ` : this._cameraUrl ? html`
-          <img src="${this._cameraUrl}" class="camera-feed" />
-        ` : html`<div class="call-icon active">📞</div>`}
-        <audio 
-          id="corte-audio"
-          autoplay
-        ></audio>
+        ${hasVideo
+          ? html`
+              <video
+                id="corte-video"
+                class="video-stream"
+                autoplay
+                playsinline
+                muted
+              ></video>
+            `
+          : this._cameraUrl
+            ? html` <img src="${this._cameraUrl}" class="camera-feed" /> `
+            : html`<div class="call-icon active">📞</div>`}
+        <audio id="corte-audio" autoplay></audio>
         <div class="call-info">
           <div class="caller-name">${this._callerName}</div>
           <div class="caller-number">${this._callerNumber}</div>
-          <div class="call-status">
-            ${this._callDuration || 'Connected'}
-          </div>
+          <div class="call-status">${this._callDuration || 'Connected'}</div>
         </div>
         <div class="call-actions">
-          <button 
-            class="action-button hangup" 
+          <button
+            class="action-button hangup"
             @click=${this._endCall}
             title="Hang Up"
           >
@@ -250,23 +259,29 @@ export class CorteSipCard extends LitElement {
   private _renderIdle(): TemplateResult {
     return html`
       <div class="idle-state">
-        ${this._cameraUrl ? html`
-          <img src="${this._cameraUrl}" class="camera-feed" />
-        ` : html`<div class="status-icon">📱</div>`}
+        ${this._cameraUrl
+          ? html` <img src="${this._cameraUrl}" class="camera-feed" /> `
+          : html`<div class="status-icon">📱</div>`}
         <div class="status-text">No Active Calls</div>
-        <div class="entity-state">Status: ${this._sipCore?.callState || 'idle'}</div>
-        ${this._config?.call_number ? html`
-          <div class="call-actions">
-            <button 
-              class="action-button call" 
-              @click=${this._startCall}
-              title="Start Call"
-            >
-              <span class="button-icon">📞</span>
-              <span class="button-text">Call ${this._config.call_number}</span>
-            </button>
-          </div>
-        ` : ''}
+        <div class="entity-state">
+          Status: ${this._sipCore?.callState || 'idle'}
+        </div>
+        ${this._config?.call_number
+          ? html`
+              <div class="call-actions">
+                <button
+                  class="action-button call"
+                  @click=${this._startCall}
+                  title="Start Call"
+                >
+                  <span class="button-icon">📞</span>
+                  <span class="button-text"
+                    >Call ${this._config.call_number}</span
+                  >
+                </button>
+              </div>
+            `
+          : ''}
       </div>
     `;
   }
@@ -329,13 +344,23 @@ export class CorteSipCard extends LitElement {
     }
 
     @keyframes ring {
-      0%, 100% { transform: rotate(-10deg); }
-      50% { transform: rotate(10deg); }
+      0%,
+      100% {
+        transform: rotate(-10deg);
+      }
+      50% {
+        transform: rotate(10deg);
+      }
     }
 
     @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.6; }
+      0%,
+      100% {
+        opacity: 1;
+      }
+      50% {
+        opacity: 0.6;
+      }
     }
 
     .call-info {
