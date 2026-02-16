@@ -138,10 +138,12 @@ export class CorteSipCardEditor
                   <mwc-button @click=${this._deleteCard}>Remove</mwc-button>
                 `
               : html`
-                  <mwc-button @click=${this._toggleCardPicker}>Add Card</mwc-button>
+                  <mwc-button @click=${this._toggleCardPicker}
+                    >Add Card</mwc-button
+                  >
                 `}
           </div>
-          
+
           ${this._showCardPicker
             ? html`
                 <hui-card-picker
@@ -152,7 +154,9 @@ export class CorteSipCardEditor
             : this._config.camera_card
               ? html`
                   <div class="card-editor-wrapper">
-                    <div class="card-type-label">Type: ${this._config.camera_card.type}</div>
+                    <div class="card-type-label">
+                      Type: ${this._config.camera_card.type}
+                    </div>
                     <hui-card-element-editor
                       .hass=${this.hass}
                       .value=${this._config.camera_card}
@@ -292,7 +296,12 @@ export class CorteSipCard extends LitElement {
       const container = this.shadowRoot?.querySelector(
         '#camera-card-container',
       );
-      console.log('[SIP Card] Container:', container, 'Card:', this._cameraCard);
+      console.log(
+        '[SIP Card] Container:',
+        container,
+        'Card:',
+        this._cameraCard,
+      );
       if (container && !container.contains(this._cameraCard)) {
         console.log('[SIP Card] Appending camera card to container');
         container.appendChild(this._cameraCard);
@@ -306,7 +315,10 @@ export class CorteSipCard extends LitElement {
       return;
     }
 
-    console.log('[SIP Card] Creating camera card with config:', this._config.camera_card);
+    console.log(
+      '[SIP Card] Creating camera card with config:',
+      this._config.camera_card,
+    );
 
     try {
       const cardConfig = this._config.camera_card;
@@ -323,8 +335,8 @@ export class CorteSipCard extends LitElement {
       try {
         await Promise.race([
           customElements.whenDefined(elementType),
-          new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('Timeout')), 5000)
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('Timeout')), 5000),
           ),
         ]);
         console.log('[SIP Card] Element is defined');
@@ -345,9 +357,7 @@ export class CorteSipCard extends LitElement {
         console.log('[SIP Card] Camera card initialized successfully');
         this.requestUpdate();
       } else {
-        console.error(
-          `Element ${elementType} does not have setConfig method`,
-        );
+        console.error(`Element ${elementType} does not have setConfig method`);
       }
     } catch (err) {
       console.error('Error creating camera card:', err);
