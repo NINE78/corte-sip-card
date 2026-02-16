@@ -1,11 +1,12 @@
 import { LitElement, html, css, TemplateResult } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
-import { HomeAssistant, LovelaceCardConfig } from 'custom-card-helpers';
+import { HomeAssistant, LovelaceCardConfig, LovelaceCardEditor } from 'custom-card-helpers';
+import { fireEvent } from 'custom-card-helpers';
 
 interface SipCardConfig extends LovelaceCardConfig {
   name?: string;
   call_number?: string;
-  camera_entity?: string;
+  camera_card?: LovelaceCardConfig; // Full embedded card config
 }
 
 interface SipCore {
@@ -26,23 +27,126 @@ declare global {
   }
 }
 
+interface LovelaceCard extends HTMLElement {
+  hass?: HomeAssistant;
+  setConfig(config: LovelaceCardConfig): void;
+}
+
+@customElement('corte-sip-card-editor')
+export class CorteSipCardEditor extends LitElement implements LovelaceCardEditor {
+  @property({ attribute: false }) public hass!: HomeAssistant;
+  @state() private _config?: SipCardConfig;
+
+  public setConfig(config: SipCardConfig): void {
+    this._config = config;
+  }
+
+  private _valueChanged(ev: CustomEvent | Event): void {
+    if (!this._config || !this.hass) return;
+    
+    const target = ev.target as any;
+    const configValue = target.configValue;
+    
+    if (!configValue) return;
+    
+    let value: any = target.value;
+    
+    // Don't update if value hasn't changed
+    if (this._config[configValue] === value) return;
+    
+    const newConfig = {
+      ...this._config,
+      [configValue]: value || undefined,
+    };
+    
+    fireEvent(this, 'config-changed', { config: newConfig });
+  }
+
+  private _cameraCardChanged(ev: CustomEvent): void {
+    ev.stopPropagation();
+    if (!this._config) return;
+
+    const newConfig = {
+      ...this._config,
+      camera_card: ev.detail.config,
+    };
+
+    fireEvent(this, 'config-changed', { config: newConfig });
+  }
+
+  protected render(): TemplateResult {
+    if (!this.hass || !this._config) {
+      return html``;
+    }
+
+    return html`
+      <div class="card-config">
+        <ha-textfield
+          label="Name (Optional)"
+          .value=${this._config.name || ''}
+          .configValue=${'name'}
+          @input=${this._valueChanged}
+        ></ha-textfield>
+        <ha-textfield
+          label="Call Number (Optional)"
+          .value=${this._config.call_number || ''}
+          .configValue=${'call_number'}
+          @input=${this._valueChanged}
+        ></ha-textfield>
+        
+        <h3>Camera Card (Optional)</h3>
+        <hui-card-element-editor
+          .hass=${this.hass}
+          .value=${this._config.camera_card}
+          @value-changed=${this._cameraCardChanged}
+        ></hui-card-element-editor>
+      </div>
+    `;
+  }
+
+  static styles = css`
+    .card-config {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      padding: 12px;
+    }
+    
+    h3 {
+      margin: 16px 0 8px 0;
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--primary-text-color);
+    }
+    
+    hui-card-element-editor {
+      display: block;
+    }
+  `;
+}
+
 @customElement('corte-sip-card')
 export class CorteSipCard extends LitElement {
   @property({ attribute: false }) public hass!: HomeAssistant;
   @state() private _config?: SipCardConfig;
   @state() private _sipCore?: SipCore;
   @state() private _isInitializing = true;
-  @state() private _cameraStreamUrl?: string;
-  @state() private _useWebRTC = false;
   private _initTimeout?: number;
-  private _hls?: any;
-  private _webrtcPeerConnection?: RTCPeerConnection;
+  private _cameraCard?: LovelaceCard;
+
+  public static getConfigElement(): LovelaceCardEditor {
+    return document.createElement('corte-sip-card-editor') as LovelaceCardEditor;
+  }
+
+  public static getStubConfig(): SipCardConfig {
+    return {
+      type: 'custom:corte-sip-card',
+      name: 'SIP Call',
+    };
+  }
 
   public setConfig(config: SipCardConfig): void {
     this._config = config;
-    if (config.camera_entity && this.hass) {
-      this._setupCameraStream();
-    }
   }
 
   connectedCallback(): void {
@@ -58,11 +162,6 @@ export class CorteSipCard extends LitElement {
       }, 3000);
     }
     window.addEventListener('sipcore-update', this._updateHandler);
-    
-    // Setup camera stream if configured
-    if (this._config?.camera_entity) {
-      this._setupCameraStream();
-    }
   }
 
   disconnectedCallback(): void {
@@ -71,15 +170,54 @@ export class CorteSipCard extends LitElement {
     if (this._initTimeout) {
       clearTimeout(this._initTimeout);
     }
-    this._cleanupCameraStream();
   }
 
   updated(changedProperties: Map<string, any>): void {
     super.updated(changedProperties);
     
-    // Initialize HLS player when camera stream URL is set (and not using WebRTC)
-    if (changedProperties.has('_cameraStreamUrl') && this._cameraStreamUrl && !this._useWebRTC) {
-      setTimeout(() => this._initHLSPlayer(), 0);
+    if (changedProperties.has('hass') && this._cameraCard) {
+      this._cameraCard.hass = this.hass;
+    }
+    
+    // Append camera card to container if it exists
+    if (this._cameraCard) {
+      const container = this.shadowRoot?.querySelector('#camera-card-container');
+      if (container && !container.contains(this._cameraCard)) {
+        container.appendChild(this._cameraCard);
+      }
+    }
+  }
+
+  private async _createCameraCard(): Promise<void> {
+    if (!this._config?.camera_card) {
+      this._cameraCard = undefined;
+      return;
+    }
+
+    try {
+      const cardConfig = this._config.camera_card;
+      
+      // Get the card type and create the element
+      const cardType = cardConfig.type.replace(/^custom:/, '');
+      let element: LovelaceCard | null = null;
+      
+      if (cardConfig.type.startsWith('custom:')) {
+        // Custom card
+        element = document.createElement(cardType) as LovelaceCard;
+      } else {
+        // Built-in Home Assistant card
+        element = document.createElement(`hui-${cardType}-card`) as LovelaceCard;
+      }
+      
+      if (element && element.setConfig) {
+        element.setConfig(cardConfig);
+        element.hass = this.hass;
+        this._cameraCard = element;
+        this.requestUpdate();
+      }
+    } catch (err) {
+      console.error('Error creating camera card:', err);
+      this._cameraCard = undefined;
     }
   }
 
@@ -143,144 +281,6 @@ export class CorteSipCard extends LitElement {
     return this._sipCore?.callDuration || '';
   }
 
-  private async _setupCameraStream(): Promise<void> {
-    if (!this._config?.camera_entity || !this.hass) return;
-    
-    // Try WebRTC first for lower latency
-    const webrtcSuccess = await this._tryWebRTC();
-    if (webrtcSuccess) return;
-    
-    // Fall back to HLS
-    await this._tryHLS();
-  }
-
-  private async _tryWebRTC(): Promise<boolean> {
-    if (!this._config?.camera_entity || !this.hass) return false;
-    
-    try {
-      // Request WebRTC connection
-      const result = await this.hass.callWS<any>({
-        type: 'camera/web_rtc_offer',
-        entity_id: this._config.camera_entity,
-        offer: await this._createWebRTCOffer(),
-      });
-      
-      if (!result || !result.answer) {
-        return false;
-      }
-      
-      // Set remote description with the answer
-      await this._webrtcPeerConnection!.setRemoteDescription(
-        new RTCSessionDescription({ type: 'answer', sdp: result.answer })
-      );
-      
-      this._useWebRTC = true;
-      this.requestUpdate();
-      return true;
-    } catch (error) {
-      console.log('WebRTC not available, falling back to HLS:', error);
-      this._cleanupWebRTC();
-      return false;
-    }
-  }
-
-  private async _createWebRTCOffer(): Promise<string> {
-    // Create peer connection
-    this._webrtcPeerConnection = new RTCPeerConnection({
-      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
-    });
-    
-    // Handle incoming tracks
-    this._webrtcPeerConnection.ontrack = (event) => {
-      const videoElement = this.shadowRoot?.getElementById('camera-stream') as HTMLVideoElement;
-      if (videoElement && event.streams[0]) {
-        videoElement.srcObject = event.streams[0];
-      }
-    };
-    
-    // Add transceiver for receiving video
-    this._webrtcPeerConnection.addTransceiver('video', { direction: 'recvonly' });
-    this._webrtcPeerConnection.addTransceiver('audio', { direction: 'recvonly' });
-    
-    // Create and return offer
-    const offer = await this._webrtcPeerConnection.createOffer();
-    await this._webrtcPeerConnection.setLocalDescription(offer);
-    
-    return offer.sdp!;
-  }
-
-  private async _tryHLS(): Promise<void> {
-    if (!this._config?.camera_entity || !this.hass) return;
-    
-    try {
-      // Request HLS stream from Home Assistant
-      const result = await this.hass.callWS<{ url: string }>({
-        type: 'camera/stream',
-        entity_id: this._config.camera_entity,
-      });
-      
-      this._cameraStreamUrl = result.url;
-      this._useWebRTC = false;
-      this.requestUpdate();
-      
-      // Setup HLS player after render
-      setTimeout(() => this._initHLSPlayer(), 100);
-    } catch (error) {
-      console.error('Failed to get camera stream:', error);
-      this._cameraStreamUrl = undefined;
-    }
-  }
-
-  private _initHLSPlayer(): void {
-    if (this._useWebRTC) return; // Don't init HLS if using WebRTC
-    
-    const videoElement = this.shadowRoot?.getElementById('camera-stream') as HTMLVideoElement;
-    if (!videoElement || !this._cameraStreamUrl) return;
-
-    // Check if browser supports HLS natively (Safari)
-    if (videoElement.canPlayType('application/vnd.apple.mpegurl')) {
-      videoElement.src = this._cameraStreamUrl;
-    } else {
-      // Use hls.js for other browsers
-      this._loadHLSLibrary().then(() => {
-        if ((window as any).Hls?.isSupported()) {
-          this._hls = new (window as any).Hls();
-          this._hls.loadSource(this._cameraStreamUrl!);
-          this._hls.attachMedia(videoElement);
-        }
-      });
-    }
-  }
-
-  private async _loadHLSLibrary(): Promise<void> {
-    if ((window as any).Hls) return;
-    
-    return new Promise((resolve, reject) => {
-      const script = document.createElement('script');
-      script.src = 'https://cdn.jsdelivr.net/npm/hls.js@latest';
-      script.onload = () => resolve();
-      script.onerror = reject;
-      document.head.appendChild(script);
-    });
-  }
-
-  private _cleanupCameraStream(): void {
-    this._cleanupWebRTC();
-    if (this._hls) {
-      this._hls.destroy();
-      this._hls = undefined;
-    }
-    this._cameraStreamUrl = undefined;
-    this._useWebRTC = false;
-  }
-
-  private _cleanupWebRTC(): void {
-    if (this._webrtcPeerConnection) {
-      this._webrtcPeerConnection.close();
-      this._webrtcPeerConnection = undefined;
-    }
-  }
-
   private _answerCall(): void {
     this._sipCore?.answerCall();
   }
@@ -337,16 +337,8 @@ export class CorteSipCard extends LitElement {
   private _renderIncomingCall(): TemplateResult {
     return html`
       <div class="incoming-call">
-        ${this._useWebRTC || this._cameraStreamUrl
-          ? html`
-              <video
-                id="camera-stream"
-                class="camera-feed"
-                autoplay
-                muted
-                playsinline
-              ></video>
-            `
+        ${this._cameraCard
+          ? html`<div id="camera-card-container"></div>`
           : html`<div class="call-icon">📞</div>`}
         <div class="call-info">
           <div class="caller-name">${this._callerName}</div>
@@ -394,16 +386,8 @@ export class CorteSipCard extends LitElement {
                 controls
               ></video>
             `
-          : this._useWebRTC || this._cameraStreamUrl
-            ? html`
-                <video
-                  id="camera-stream"
-                  class="camera-feed"
-                  autoplay
-                  muted
-                  playsinline
-                ></video>
-              `
+          : this._cameraCard
+            ? html`<div id="camera-card-container"></div>`
             : html`<div class="call-icon active">📞</div>`}
         <audio id="corte-audio" autoplay></audio>
         <div class="call-info">
@@ -428,16 +412,8 @@ export class CorteSipCard extends LitElement {
   private _renderIdle(): TemplateResult {
     return html`
       <div class="idle-state">
-        ${this._useWebRTC || this._cameraStreamUrl
-          ? html`
-              <video
-                id="camera-stream"
-                class="camera-feed"
-                autoplay
-                muted
-                playsinline
-              ></video>
-            `
+        ${this._cameraCard
+          ? html`<div id="camera-card-container"></div>`
           : html`<div class="status-icon">📱</div>`}
         <div class="status-text">No Active Calls</div>
         <div class="entity-state">
@@ -491,6 +467,11 @@ export class CorteSipCard extends LitElement {
       align-items: center;
       gap: 16px;
       position: relative;
+    }
+
+    #camera-card-container {
+      width: 100%;
+      display: block;
     }
 
     .video-stream,
