@@ -21,6 +21,8 @@ interface SipCore {
   remoteNumber: string | null;
   remoteAudioStream: MediaStream | null;
   remoteVideoStream: MediaStream | null;
+  registered: boolean; // Actual property from SIP Core
+  ua: any; // JSSIP User Agent - needed to trigger registration
   answerCall(): void;
   endCall(): void;
   startCall(number: string): void;
@@ -231,6 +233,7 @@ export class CorteSipCard extends LitElement {
   @state() private _config?: SipCardConfig;
   @state() private _sipCore?: SipCore;
   @state() private _isInitializing = true;
+  @state() private _callError?: string;
   private _initTimeout?: number;
   private _cameraCard?: LovelaceCard;
   private _cameraCardCreated = false;
@@ -418,8 +421,55 @@ export class CorteSipCard extends LitElement {
 
   private _startCall(): void {
     const number = this._config?.call_number;
-    if (number && this._sipCore) {
+    if (!number || !this._sipCore) return;
+
+    // Clear previous errors
+    this._callError = undefined;
+
+    // Check registration status
+    if (!this._sipCore.registered) {
+      // Attempt to register
+      try {
+        if (this._sipCore.ua && !this._sipCore.ua.isRegistered()) {
+          this._callError = 'Attempting to register with SIP server...';
+          this._sipCore.ua.start();
+          
+          // Wait a moment for registration, then retry call
+          setTimeout(() => {
+            if (this._sipCore?.registered) {
+              this._callError = undefined;
+              this._sipCore.startCall(number);
+            } else {
+              this._callError = 'Failed to register with SIP server';
+              setTimeout(() => {
+                this._callError = undefined;
+                this.requestUpdate();
+              }, 5000);
+            }
+            this.requestUpdate();
+          }, 2000);
+          return;
+        }
+      } catch (err) {
+        console.error('Error attempting to register:', err);
+      }
+      
+      this._callError = 'Not registered with SIP server';
+      setTimeout(() => {
+        this._callError = undefined;
+        this.requestUpdate();
+      }, 5000);
+      return;
+    }
+
+    try {
       this._sipCore.startCall(number);
+    } catch (err) {
+      this._callError = `Failed to start call: ${err instanceof Error ? err.message : 'Unknown error'}`;
+      setTimeout(() => {
+        this._callError = undefined;
+        this.requestUpdate();
+      }, 5000);
     }
   }
 
@@ -451,7 +501,10 @@ export class CorteSipCard extends LitElement {
     return html`
       <ha-card .header=${cardName}>
         ${this._cameraCard
-          ? html`<div id="camera-card-container" class="camera-container"></div>`
+          ? html`<div
+              id="camera-card-container"
+              class="camera-container"
+            ></div>`
           : ''}
         <div class="card-content">
           ${cache(
@@ -540,13 +593,20 @@ export class CorteSipCard extends LitElement {
   }
 
   private _renderIdle(): TemplateResult {
+    const statusText = this._sipCore?.registered
+      ? (this._sipCore?.callState || 'idle')
+      : 'Not Registered';
+
     return html`
       <div class="idle-state">
         ${this._cameraCard ? '' : html`<div class="status-icon">📱</div>`}
         <div class="status-text">No Active Calls</div>
         <div class="entity-state">
-          Status: ${this._sipCore?.callState || 'idle'}
+          Status: ${statusText}
         </div>
+        ${this._callError
+          ? html`<div class="call-error">${this._callError}</div>`
+          : ''}
         ${this._config?.call_number
           ? html`
               <div class="call-actions">
@@ -681,6 +741,16 @@ export class CorteSipCard extends LitElement {
       font-size: 12px;
       color: var(--secondary-text-color);
       opacity: 0.7;
+    }
+
+    .call-error {
+      font-size: 14px;
+      color: var(--error-color, #ff0000);
+      background: var(--error-color-opacity, rgba(255, 0, 0, 0.1));
+      padding: 8px 12px;
+      border-radius: 4px;
+      text-align: center;
+      width: 100%;
     }
 
     .call-actions {
