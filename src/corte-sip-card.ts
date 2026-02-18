@@ -1,5 +1,6 @@
 import { LitElement, html, css, TemplateResult } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
+import { cache } from 'lit/directives/cache.js';
 import {
   HomeAssistant,
   LovelaceCardConfig,
@@ -281,7 +282,6 @@ export class CorteSipCard extends LitElement {
 
     // Create camera card when we have both hass and config
     if (this.hass && this._config?.camera_card && !this._cameraCardCreated) {
-      console.log('[SIP Card] Triggering camera card creation in updated()');
       this._cameraCardCreated = true;
       this._createCameraCard();
     }
@@ -294,16 +294,9 @@ export class CorteSipCard extends LitElement {
     // Append camera card to container if it exists
     if (this._cameraCard) {
       const container = this.shadowRoot?.querySelector(
-        '#camera-card-container',
-      );
-      console.log(
-        '[SIP Card] Container:',
-        container,
-        'Card:',
-        this._cameraCard,
-      );
+        '.camera-container',
+      ) as HTMLElement;
       if (container && !container.contains(this._cameraCard)) {
-        console.log('[SIP Card] Appending camera card to container');
         container.appendChild(this._cameraCard);
       }
     }
@@ -315,11 +308,6 @@ export class CorteSipCard extends LitElement {
       return;
     }
 
-    console.log(
-      '[SIP Card] Creating camera card with config:',
-      this._config.camera_card,
-    );
-
     try {
       const cardConfig = this._config.camera_card;
 
@@ -329,8 +317,6 @@ export class CorteSipCard extends LitElement {
         ? cardType
         : `hui-${cardType}-card`;
 
-      console.log('[SIP Card] Element type:', elementType);
-
       // Try to wait for element definition, but don't block forever
       try {
         await Promise.race([
@@ -339,7 +325,6 @@ export class CorteSipCard extends LitElement {
             setTimeout(() => reject(new Error('Timeout')), 5000),
           ),
         ]);
-        console.log('[SIP Card] Element is defined');
       } catch (e) {
         console.warn(
           `Element ${elementType} not defined yet, attempting to create anyway`,
@@ -348,13 +333,11 @@ export class CorteSipCard extends LitElement {
 
       // Create the element
       const element = document.createElement(elementType) as LovelaceCard;
-      console.log('[SIP Card] Created element:', element);
 
       if (element && element.setConfig) {
         element.setConfig(cardConfig);
         element.hass = this.hass;
         this._cameraCard = element;
-        console.log('[SIP Card] Camera card initialized successfully');
         this.requestUpdate();
       } else {
         console.error(`Element ${elementType} does not have setConfig method`);
@@ -467,12 +450,17 @@ export class CorteSipCard extends LitElement {
 
     return html`
       <ha-card .header=${cardName}>
+        ${this._cameraCard
+          ? html`<div id="camera-card-container" class="camera-container"></div>`
+          : ''}
         <div class="card-content">
-          ${this._isRinging
-            ? this._renderIncomingCall()
-            : this._isInCall
-              ? this._renderActiveCall()
-              : this._renderIdle()}
+          ${cache(
+            this._isRinging
+              ? this._renderIncomingCall()
+              : this._isInCall
+                ? this._renderActiveCall()
+                : this._renderIdle(),
+          )}
         </div>
       </ha-card>
     `;
@@ -481,9 +469,7 @@ export class CorteSipCard extends LitElement {
   private _renderIncomingCall(): TemplateResult {
     return html`
       <div class="incoming-call">
-        ${this._cameraCard
-          ? html`<div id="camera-card-container"></div>`
-          : html`<div class="call-icon">📞</div>`}
+        ${this._cameraCard ? '' : html`<div class="call-icon">📞</div>`}
         <div class="call-info">
           <div class="caller-name">${this._callerName}</div>
           <div class="caller-number">${this._callerNumber}</div>
@@ -530,9 +516,9 @@ export class CorteSipCard extends LitElement {
                 controls
               ></video>
             `
-          : this._cameraCard
-            ? html`<div id="camera-card-container"></div>`
-            : html`<div class="call-icon active">📞</div>`}
+          : !this._cameraCard
+            ? html`<div class="call-icon active">📞</div>`
+            : ''}
         <audio id="corte-audio" autoplay></audio>
         <div class="call-info">
           <div class="caller-name">${this._callerName}</div>
@@ -556,9 +542,7 @@ export class CorteSipCard extends LitElement {
   private _renderIdle(): TemplateResult {
     return html`
       <div class="idle-state">
-        ${this._cameraCard
-          ? html`<div id="camera-card-container"></div>`
-          : html`<div class="status-icon">📱</div>`}
+        ${this._cameraCard ? '' : html`<div class="status-icon">📱</div>`}
         <div class="status-text">No Active Calls</div>
         <div class="entity-state">
           Status: ${this._sipCore?.callState || 'idle'}
@@ -588,6 +572,11 @@ export class CorteSipCard extends LitElement {
       background: var(--card-background-color);
     }
 
+    .camera-container {
+      width: 100%;
+      display: block;
+    }
+
     .card-content {
       padding: 16px;
     }
@@ -610,12 +599,6 @@ export class CorteSipCard extends LitElement {
       flex-direction: column;
       align-items: center;
       gap: 16px;
-      position: relative;
-    }
-
-    #camera-card-container {
-      width: 100%;
-      display: block;
     }
 
     .video-stream,
