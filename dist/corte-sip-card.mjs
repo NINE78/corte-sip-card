@@ -981,7 +981,6 @@ let $ = class extends A {
         <audio id="corte-audio" autoplay></audio>
         <div class="call-info">
           <div class="caller-name">${this._callerName}</div>
-          <div class="caller-number">${this._callerNumber}</div>
           <div class="call-status">${this._callDuration || "Connected"}</div>
         </div>
         <div class="call-actions">
@@ -1002,10 +1001,7 @@ let $ = class extends A {
     return d`
       <div class="idle-state">
         ${this._cameraCard ? "" : d`<div class="status-icon">📱</div>`}
-        <div class="status-text">No Active Calls</div>
-        <div class="entity-state">
-          Status: ${i}
-        </div>
+        <div class="entity-state">Status: ${i}</div>
         ${this._callError ? d`<div class="call-error">${this._callError}</div>` : ""}
         ${this._config?.call_number ? d`
               <div class="call-actions">

@@ -433,7 +433,7 @@ export class CorteSipCard extends LitElement {
         if (this._sipCore.ua && !this._sipCore.ua.isRegistered()) {
           this._callError = 'Attempting to register with SIP server...';
           this._sipCore.ua.start();
-          
+
           // Wait a moment for registration, then retry call
           setTimeout(() => {
             if (this._sipCore?.registered) {
@@ -453,7 +453,7 @@ export class CorteSipCard extends LitElement {
       } catch (err) {
         console.error('Error attempting to register:', err);
       }
-      
+
       this._callError = 'Not registered with SIP server';
       setTimeout(() => {
         this._callError = undefined;
@@ -575,7 +575,6 @@ export class CorteSipCard extends LitElement {
         <audio id="corte-audio" autoplay></audio>
         <div class="call-info">
           <div class="caller-name">${this._callerName}</div>
-          <div class="caller-number">${this._callerNumber}</div>
           <div class="call-status">${this._callDuration || 'Connected'}</div>
         </div>
         <div class="call-actions">
@@ -594,16 +593,13 @@ export class CorteSipCard extends LitElement {
 
   private _renderIdle(): TemplateResult {
     const statusText = this._sipCore?.registered
-      ? (this._sipCore?.callState || 'idle')
+      ? this._sipCore?.callState || 'idle'
       : 'Not Registered';
 
     return html`
       <div class="idle-state">
         ${this._cameraCard ? '' : html`<div class="status-icon">📱</div>`}
-        <div class="status-text">No Active Calls</div>
-        <div class="entity-state">
-          Status: ${statusText}
-        </div>
+        <div class="entity-state">Status: ${statusText}</div>
         ${this._callError
           ? html`<div class="call-error">${this._callError}</div>`
           : ''}
