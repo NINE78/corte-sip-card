@@ -607,7 +607,7 @@ export class CorteSipCard extends LitElement {
                   @click=${this._startCall}
                   title="Start Call"
                 >
-                  <span class="button-text">Call</span>
+                  <span class="button-text">Calll</span>
                 </button>
               </div>
             `
