@@ -235,6 +235,10 @@ export class CorteSipCard extends LitElement {
   @state() private _isInitializing = true;
   @state() private _callError?: string;
   private _initTimeout?: number;
+  private _reregisterInterval?: number;
+  private _isReconnecting = false;
+  private _uaDisconnectedHandler?: () => void;
+  private _uaRegistrationFailedHandler?: () => void;
   private _cameraCard?: LovelaceCard;
   private _cameraCardCreated = false;
 
@@ -262,6 +266,7 @@ export class CorteSipCard extends LitElement {
     if (window.sipCore) {
       this._sipCore = window.sipCore;
       this._isInitializing = false;
+      this._attachUaListeners();
     } else {
       // Wait up to 3 seconds for SIP Core to load before showing error
       this._initTimeout = window.setTimeout(() => {
@@ -270,13 +275,81 @@ export class CorteSipCard extends LitElement {
       }, 3000);
     }
     window.addEventListener('sipcore-update', this._updateHandler);
+    this._reregisterInterval = window.setInterval(
+      () => this._checkAndReregister(),
+      30000,
+    );
   }
 
   disconnectedCallback(): void {
     super.disconnectedCallback();
     window.removeEventListener('sipcore-update', this._updateHandler);
+    this._detachUaListeners();
     if (this._initTimeout) {
       clearTimeout(this._initTimeout);
+    }
+    if (this._reregisterInterval) {
+      clearInterval(this._reregisterInterval);
+      this._reregisterInterval = undefined;
+    }
+  }
+
+  private _attachUaListeners(): void {
+    const ua = this._sipCore?.ua;
+    if (!ua || typeof ua.on !== 'function') return;
+
+    this._uaDisconnectedHandler = () => {
+      if (!this._isReconnecting) this._checkAndReregister();
+    };
+    this._uaRegistrationFailedHandler = () => {
+      if (!this._isReconnecting) this._checkAndReregister();
+    };
+
+    ua.on('disconnected', this._uaDisconnectedHandler);
+    ua.on('registrationFailed', this._uaRegistrationFailedHandler);
+  }
+
+  private _detachUaListeners(): void {
+    const ua = this._sipCore?.ua;
+    if (!ua || typeof ua.removeListener !== 'function') return;
+
+    if (this._uaDisconnectedHandler) {
+      ua.removeListener('disconnected', this._uaDisconnectedHandler);
+      this._uaDisconnectedHandler = undefined;
+    }
+    if (this._uaRegistrationFailedHandler) {
+      ua.removeListener('registrationFailed', this._uaRegistrationFailedHandler);
+      this._uaRegistrationFailedHandler = undefined;
+    }
+  }
+
+  private _checkAndReregister(): void {
+    const core = this._sipCore ?? window.sipCore;
+    if (!core || this._isReconnecting) return;
+
+    // Skip while a call is active
+    if (core.callState === 'ringing' || core.callState === 'connected' || core.callState === 'talking') return;
+
+    if (!core.registered && core.ua) {
+      this._isReconnecting = true;
+      try {
+        // stop() resets the broken transport state; start() then reconnects and re-registers
+        core.ua.stop();
+      } catch (err) {
+        console.warn('corte-sip-card: ua.stop() failed', err);
+      }
+      window.setTimeout(() => {
+        try {
+          core.ua.start();
+        } catch (err) {
+          console.error('corte-sip-card: ua.start() failed', err);
+        }
+        // Keep the guard up long enough for JSSIP to attempt registration
+        window.setTimeout(() => {
+          this._isReconnecting = false;
+          this.requestUpdate();
+        }, 5000);
+      }, 1000);
     }
   }
 
@@ -359,6 +432,7 @@ export class CorteSipCard extends LitElement {
         clearTimeout(this._initTimeout);
         this._initTimeout = undefined;
       }
+      this._attachUaListeners();
     }
     this._updateStreams();
     this.requestUpdate();
@@ -428,37 +502,9 @@ export class CorteSipCard extends LitElement {
 
     // Check registration status
     if (!this._sipCore.registered) {
-      // Attempt to register
-      try {
-        if (this._sipCore.ua && !this._sipCore.ua.isRegistered()) {
-          this._callError = 'Attempting to register with SIP server...';
-          this._sipCore.ua.start();
-
-          // Wait a moment for registration, then retry call
-          setTimeout(() => {
-            if (this._sipCore?.registered) {
-              this._callError = undefined;
-              this._sipCore.startCall(number);
-            } else {
-              this._callError = 'Failed to register with SIP server';
-              setTimeout(() => {
-                this._callError = undefined;
-                this.requestUpdate();
-              }, 5000);
-            }
-            this.requestUpdate();
-          }, 2000);
-          return;
-        }
-      } catch (err) {
-        console.error('Error attempting to register:', err);
-      }
-
-      this._callError = 'Not registered with SIP server';
-      setTimeout(() => {
-        this._callError = undefined;
-        this.requestUpdate();
-      }, 5000);
+      this._callError = 'Attempting to register with SIP server...';
+      this.requestUpdate();
+      this._reconnectThenCall(number);
       return;
     }
 
@@ -471,6 +517,51 @@ export class CorteSipCard extends LitElement {
         this.requestUpdate();
       }, 5000);
     }
+  }
+
+  private _reconnectThenCall(number: string): void {
+    const core = this._sipCore;
+    if (!core?.ua) {
+      this._callError = 'Not registered with SIP server';
+      setTimeout(() => { this._callError = undefined; this.requestUpdate(); }, 5000);
+      return;
+    }
+
+    // Full stop→start cycle to reset broken transport state
+    try {
+      core.ua.stop();
+    } catch (err) {
+      console.warn('corte-sip-card: ua.stop() failed during call attempt', err);
+    }
+    window.setTimeout(() => {
+      try {
+        core.ua.start();
+      } catch (err) {
+        console.error('corte-sip-card: ua.start() failed during call attempt', err);
+      }
+    }, 1000);
+
+    // Poll every second for up to 10 s waiting for registration
+    let attempts = 0;
+    const poll = window.setInterval(() => {
+      attempts++;
+      if (this._sipCore?.registered) {
+        clearInterval(poll);
+        this._callError = undefined;
+        try {
+          this._sipCore.startCall(number);
+        } catch (err) {
+          this._callError = `Failed to start call: ${err instanceof Error ? err.message : 'Unknown error'}`;
+          setTimeout(() => { this._callError = undefined; this.requestUpdate(); }, 5000);
+        }
+        this.requestUpdate();
+      } else if (attempts >= 10) {
+        clearInterval(poll);
+        this._callError = 'Failed to register with SIP server';
+        setTimeout(() => { this._callError = undefined; this.requestUpdate(); }, 5000);
+        this.requestUpdate();
+      }
+    }, 1000);
   }
 
   protected render(): TemplateResult {
