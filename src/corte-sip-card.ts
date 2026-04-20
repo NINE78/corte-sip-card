@@ -95,7 +95,7 @@ export class CorteSipCardEditor
 
     const newConfig = {
       ...this._config,
-      camera_card: ev.detail.config,
+      camera_card: ev.detail.value || ev.detail.config,
     };
 
     fireEvent(this, 'config-changed', { config: newConfig });
@@ -534,7 +534,6 @@ export class CorteSipCard extends LitElement {
             @click=${this._answerCall}
             title="Answer Call"
           >
-            <span class="button-icon">📞</span>
             <span class="button-text">Answer</span>
           </button>
           <button
@@ -542,7 +541,6 @@ export class CorteSipCard extends LitElement {
             @click=${this._endCall}
             title="Reject Call"
           >
-            <span class="button-icon">✖️</span>
             <span class="button-text">Reject</span>
           </button>
         </div>
@@ -574,7 +572,6 @@ export class CorteSipCard extends LitElement {
             : ''}
         <audio id="corte-audio" autoplay></audio>
         <div class="call-info">
-          <div class="caller-name">${this._callerName}</div>
           <div class="call-status">${this._callDuration || 'Connected'}</div>
         </div>
         <div class="call-actions">
@@ -583,7 +580,6 @@ export class CorteSipCard extends LitElement {
             @click=${this._endCall}
             title="Hang Up"
           >
-            <span class="button-icon">📵</span>
             <span class="button-text">Hang Up</span>
           </button>
         </div>
@@ -611,10 +607,7 @@ export class CorteSipCard extends LitElement {
                   @click=${this._startCall}
                   title="Start Call"
                 >
-                  <span class="button-icon">📞</span>
-                  <span class="button-text"
-                    >Call ${this._config.call_number}</span
-                  >
+                  <span class="button-text">Call</span>
                 </button>
               </div>
             `
@@ -723,7 +716,7 @@ export class CorteSipCard extends LitElement {
     }
 
     .call-status {
-      font-size: 14px;
+      font-size: 12px;
       color: var(--primary-color);
       font-weight: 500;
     }
