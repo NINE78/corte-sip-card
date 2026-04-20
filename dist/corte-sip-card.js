@@ -1006,7 +1006,7 @@ let $ = class extends A {
                   @click=${this._startCall}
                   title="Start Call"
                 >
-                  <span class="button-text">Call</span>
+                  <span class="button-text">Belleuh</span>
                 </button>
               </div>
             ` : ""}
