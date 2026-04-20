@@ -6,7 +6,7 @@ export default defineConfig({
       // The path to your main TypeScript file
       entry: 'src/corte-sip-card.ts',
       formats: ['es'], // Home Assistant uses ES Modules
-      fileName: 'corte-sip-card',
+      fileName: () => 'corte-sip-card.js',
     },
     rollupOptions: {
       // This prevents Vite from adding a hash to the filename (e.g., card-gh392.js)
