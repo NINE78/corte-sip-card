@@ -743,7 +743,11 @@ export class CorteSipCard extends LitElement {
           ? html`
               <div class="call-actions">
                 <button
-                  class="action-button call${connecting ? ' connecting' : registered ? '' : ' unregistered'}"
+                  class="action-button call${connecting
+                    ? ' connecting'
+                    : registered
+                      ? ''
+                      : ' unregistered'}"
                   @click=${this._startCall}
                   ?disabled=${connecting}
                   title=${connecting
@@ -752,7 +756,9 @@ export class CorteSipCard extends LitElement {
                       ? 'Start Call'
                       : 'Not registered with SIP server'}
                 >
-                  <span class="button-text">${connecting ? 'Call' : 'Call'}</span>
+                  <span class="button-text"
+                    >${connecting ? 'Call' : 'Call'}</span
+                  >
                   ${connecting
                     ? html`<span class="button-status">Connecting...</span>`
                     : registered
