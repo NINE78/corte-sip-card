@@ -884,6 +884,8 @@ export class CorteSipCard extends LitElement {
 
     .button-status {
       font-size: 10px;
+      line-height: 1.2;
+      min-height: 1.2em;
       opacity: 0.85;
       margin-top: 2px;
     }
@@ -931,6 +933,7 @@ export class CorteSipCard extends LitElement {
       display: flex;
       flex-direction: column;
       align-items: center;
+      justify-content: center;
       gap: 6px;
       padding: 12px 24px;
       border: none;
@@ -941,6 +944,7 @@ export class CorteSipCard extends LitElement {
       font-weight: 500;
       transition: all 0.2s ease;
       min-width: 100px;
+      min-height: 64px;
     }
 
     .button-icon {
