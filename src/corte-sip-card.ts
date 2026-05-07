@@ -234,6 +234,7 @@ export class CorteSipCard extends LitElement {
   @state() private _sipCore?: SipCore;
   @state() private _isInitializing = true;
   @state() private _callError?: string;
+  @state() private _isConnecting = false;
   private _initTimeout?: number;
   private _reregisterInterval?: number;
   private _isReconnecting = false;
@@ -470,6 +471,18 @@ export class CorteSipCard extends LitElement {
       }
       this._attachUaListeners();
     }
+    // Clear connecting flag once the call is established or dropped
+    if (this._isConnecting) {
+      const state = this._sipCore?.callState;
+      if (
+        state === 'connected' ||
+        state === 'talking' ||
+        state === 'idle' ||
+        !state
+      ) {
+        this._isConnecting = false;
+      }
+    }
     this._updateStreams();
     this.requestUpdate();
   };
@@ -546,6 +559,7 @@ export class CorteSipCard extends LitElement {
 
     try {
       this._sipCore.startCall(number);
+      this._isConnecting = true;
     } catch (err) {
       this._callError = `Failed to start call: ${err instanceof Error ? err.message : 'Unknown error'}`;
       setTimeout(() => {
@@ -699,9 +713,6 @@ export class CorteSipCard extends LitElement {
             ? html`<div class="call-icon active">📞</div>`
             : ''}
         <audio id="corte-audio" autoplay></audio>
-        <div class="call-info">
-          <div class="call-status">${this._callDuration || 'Connected'}</div>
-        </div>
         <div class="call-actions">
           <button
             class="action-button hangup"
@@ -709,6 +720,9 @@ export class CorteSipCard extends LitElement {
             title="Hang Up"
           >
             <span class="button-text">Hang Up</span>
+            ${this._callDuration
+              ? html`<span class="button-status">${this._callDuration}</span>`
+              : ''}
           </button>
         </div>
       </div>
@@ -717,6 +731,7 @@ export class CorteSipCard extends LitElement {
 
   private _renderIdle(): TemplateResult {
     const registered = this._sipCore?.registered ?? false;
+    const connecting = this._isConnecting;
 
     return html`
       <div class="idle-state">
@@ -728,14 +743,21 @@ export class CorteSipCard extends LitElement {
           ? html`
               <div class="call-actions">
                 <button
-                  class="action-button call${registered ? '' : ' unregistered'}"
+                  class="action-button call${connecting ? ' connecting' : registered ? '' : ' unregistered'}"
                   @click=${this._startCall}
-                  title=${registered ? 'Start Call' : 'Not registered with SIP server'}
+                  ?disabled=${connecting}
+                  title=${connecting
+                    ? 'Connecting...'
+                    : registered
+                      ? 'Start Call'
+                      : 'Not registered with SIP server'}
                 >
-                  <span class="button-text">Call</span>
-                  ${registered
-                    ? ''
-                    : html`<span class="button-status">Not Registered</span>`}
+                  <span class="button-text">${connecting ? 'Call' : 'Call'}</span>
+                  ${connecting
+                    ? html`<span class="button-status">Connecting...</span>`
+                    : registered
+                      ? ''
+                      : html`<span class="button-status">Not Registered</span>`}
                 </button>
               </div>
             `
@@ -867,6 +889,20 @@ export class CorteSipCard extends LitElement {
     .action-button.unregistered:hover {
       background: var(--disabled-color, #9e9e9e);
       transform: none;
+    }
+
+    .action-button.connecting {
+      background: var(--warning-color, #ff9800);
+      color: white;
+    }
+
+    .action-button.connecting:hover {
+      background: var(--warning-color, #ff9800);
+      transform: none;
+    }
+
+    .action-button:disabled {
+      cursor: default;
     }
 
     .call-error {
