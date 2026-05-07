@@ -716,14 +716,11 @@ export class CorteSipCard extends LitElement {
   }
 
   private _renderIdle(): TemplateResult {
-    const statusText = this._sipCore?.registered
-      ? this._sipCore?.callState || 'idle'
-      : 'Not Registered';
+    const registered = this._sipCore?.registered ?? false;
 
     return html`
       <div class="idle-state">
         ${this._cameraCard ? '' : html`<div class="status-icon">📱</div>`}
-        <div class="entity-state">Status: ${statusText}</div>
         ${this._callError
           ? html`<div class="call-error">${this._callError}</div>`
           : ''}
@@ -731,11 +728,14 @@ export class CorteSipCard extends LitElement {
           ? html`
               <div class="call-actions">
                 <button
-                  class="action-button call"
+                  class="action-button call${registered ? '' : ' unregistered'}"
                   @click=${this._startCall}
-                  title="Start Call"
+                  title=${registered ? 'Start Call' : 'Not registered with SIP server'}
                 >
                   <span class="button-text">Call</span>
+                  ${registered
+                    ? ''
+                    : html`<span class="button-status">Not Registered</span>`}
                 </button>
               </div>
             `
@@ -854,10 +854,19 @@ export class CorteSipCard extends LitElement {
       color: var(--secondary-text-color);
     }
 
-    .entity-state {
-      font-size: 12px;
-      color: var(--secondary-text-color);
-      opacity: 0.7;
+    .button-status {
+      font-size: 10px;
+      opacity: 0.85;
+      margin-top: 2px;
+    }
+
+    .action-button.unregistered {
+      background: var(--disabled-color, #9e9e9e);
+    }
+
+    .action-button.unregistered:hover {
+      background: var(--disabled-color, #9e9e9e);
+      transform: none;
     }
 
     .call-error {
